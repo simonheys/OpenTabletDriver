@@ -52,6 +52,7 @@ namespace OpenTabletDriver.Desktop.Interop.Input
         private IntPtr _mouseEvent;
         private readonly double _doubleClickIntervalInMs;
         private readonly MacOSVirtualKeyboard _keyboard;
+        private uint _mouseEventNumber;
 
         public MacOSVirtualMouse()
         {
@@ -63,6 +64,12 @@ namespace OpenTabletDriver.Desktop.Interop.Input
             _mouseEvent = CGEventCreate(_eventSource);
             _keyboard = DesktopInterop.VirtualKeyboard as MacOSVirtualKeyboard
                         ?? throw new InvalidOperationException("Could not get virtual keyboard");
+
+            // macOS 27 requires numbered synthetic clicks to focus inactive windows.
+            _mouseEventNumber = unchecked(
+                CGEventSourceCounterForEventType(CGEventSourceStateHIDSystemState, CGEventType.kCGEventLeftMouseDown) +
+                CGEventSourceCounterForEventType(CGEventSourceStateHIDSystemState, CGEventType.kCGEventRightMouseDown) +
+                CGEventSourceCounterForEventType(CGEventSourceStateHIDSystemState, CGEventType.kCGEventOtherMouseDown));
         }
 
         public void MouseDown(MouseButton button)
@@ -103,6 +110,8 @@ namespace OpenTabletDriver.Desktop.Interop.Input
                 var lastButtonSet = IsButtonSet(_currButtonStates, _lastButton);
                 var cgEventType = ToDragCGEventType(_lastButton, lastButtonSet);
                 CGEventSetType(_mouseEvent, cgEventType);
+                if (lastButtonSet)
+                    CGEventSetIntegerValueField(_mouseEvent, CGEventField.mouseEventNumber, _mouseEventNumber);
                 SetPendingPosition(_mouseEvent, position.X, position.Y);
                 ApplyTabletValues();
                 PostEvent();
@@ -242,6 +251,9 @@ namespace OpenTabletDriver.Desktop.Interop.Input
                     // propagate pending position to mouseEvent
                     var cgEventType = ToNoDragCGEventType(button, currState);
                     CGEventSetType(_mouseEvent, cgEventType);
+                    if (currState)
+                        _mouseEventNumber = unchecked(_mouseEventNumber + 1);
+                    CGEventSetIntegerValueField(_mouseEvent, CGEventField.mouseEventNumber, _mouseEventNumber);
                     if (DrainPendingPosition() is { } position)
                     {
                         SetPendingPosition(_mouseEvent, position.X, position.Y);
